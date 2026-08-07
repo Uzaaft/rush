@@ -62,7 +62,7 @@ each <span class="var">$XDG_DATA_DIRS</span> entry + /rush/functions
 
   <p><span class="var">$XDG_DATA_HOME</span> falls back to <span class="var">$HOME</span><code>/.local/share</code>. When <span class="var">$XDG_DATA_DIRS</span> is unset, Rush searches <code>/usr/local/share</code> and <code>/usr/share</code>.</p>
 
-  <p>If a name exists in more than one directory, the first matching file wins. Shipped autoload functions in <code>share/rush/functions</code> include colorized <code>ls</code>/<code>grep</code>/<code>diff</code> helpers, <code>path_add</code>/<code>path_prepend</code>/<code>path_append</code>/<code>path_remove</code> PATH helpers, and opt-in <a href="#project-environments">project environment hooks</a>.</p>
+  <p>If a name exists in more than one directory, the first matching file wins. Shipped autoload functions in <code>share/rush/functions</code> include colorized <code>ls</code>/<code>grep</code>/<code>diff</code> helpers, an <code>open</code> wrapper for systems with <code>xdg-open</code> or <code>cygstart</code>, <code>path_add</code>/<code>path_prepend</code>/<code>path_append</code>/<code>path_remove</code> PATH helpers, and opt-in <a href="#project-environments">project environment hooks</a>.</p>
 
   <pre><span class="cmd">path_prepend</span> <span class="var">$HOME</span>/.local/bin
 <span class="cmd">path_append</span> ./node_modules/.bin

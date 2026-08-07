@@ -1,0 +1,32 @@
+# Open files and URLs when the platform does not provide an open utility.
+if ! command -v open >/dev/null 2>&1; then
+  open() {
+    local rush_open_launcher rush_open_status rush_open_target
+
+    if test "$#" -eq 0; then
+      printf 'open: usage: open file-or-url ...\n' >&2
+      return 2
+    fi
+    case $1 in
+      -h|--help)
+        printf 'usage: open file-or-url ...\n'
+        return 0
+        ;;
+    esac
+
+    if command -v cygstart >/dev/null 2>&1; then
+      rush_open_launcher=cygstart
+    elif command -v xdg-open >/dev/null 2>&1; then
+      rush_open_launcher=xdg-open
+    else
+      printf 'open: no opener found; install xdg-utils or provide cygstart\n' >&2
+      return 127
+    fi
+
+    rush_open_status=0
+    for rush_open_target do
+      command "$rush_open_launcher" "$rush_open_target" || rush_open_status=$?
+    done
+    return "$rush_open_status"
+  }
+fi
