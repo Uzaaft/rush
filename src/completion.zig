@@ -756,22 +756,53 @@ fn providerValue(providers: ?std.json.Value, ref: std.json.Value) ?std.json.Valu
 fn findCompletionFile(allocator: std.mem.Allocator, sh: anytype, root: []const u8, extension: []const u8) !?[]const u8 {
     const file_name = try std.fmt.allocPrint(allocator, "{s}{s}", .{ root, extension });
     defer allocator.free(file_name);
-    const local = try std.fs.path.join(allocator, &.{ "share", "rush", "completions", file_name });
-    if (try fileExists(sh, local)) return local;
-    allocator.free(local);
+    if (try findCompletionFileUnder(allocator, sh, "share", file_name)) |path| return path;
     if (shellValue(sh, "XDG_CONFIG_HOME")) |xdg_config_home| {
-        const path = try std.fs.path.join(allocator, &.{ xdg_config_home, "rush", "completions", file_name });
-        if (try fileExists(sh, path)) return path;
-        allocator.free(path);
+        if (xdg_config_home.len != 0) {
+            if (try findCompletionFileUnder(allocator, sh, xdg_config_home, file_name)) |path| return path;
+        }
     }
     if (shellValue(sh, "HOME")) |home| {
-        const path = try std.fs.path.join(allocator, &.{ home, ".config", "rush", "completions", file_name });
-        if (try fileExists(sh, path)) return path;
-        allocator.free(path);
+        if (home.len != 0) {
+            const config_home = try std.fs.path.join(allocator, &.{ home, ".config" });
+            defer allocator.free(config_home);
+            if (try findCompletionFileUnder(allocator, sh, config_home, file_name)) |path| return path;
+        }
     }
-    const installed = try std.fs.path.join(allocator, &.{ build_config.datadir, "rush", "completions", file_name });
-    if (try fileExists(sh, installed)) return installed;
-    allocator.free(installed);
+    const xdg_data_home = shellValue(sh, "XDG_DATA_HOME");
+    if (xdg_data_home) |data_home| {
+        if (data_home.len != 0) {
+            if (try findCompletionFileUnder(allocator, sh, data_home, file_name)) |path| return path;
+        }
+    }
+    if (xdg_data_home == null or xdg_data_home.?.len == 0) {
+        if (shellValue(sh, "HOME")) |home| {
+            if (home.len != 0) {
+                const data_home = try std.fs.path.join(allocator, &.{ home, ".local", "share" });
+                defer allocator.free(data_home);
+                if (try findCompletionFileUnder(allocator, sh, data_home, file_name)) |path| return path;
+            }
+        }
+    }
+    const data_dirs = shellValue(sh, "XDG_DATA_DIRS") orelse "/usr/local/share:/usr/share";
+    var parts = std.mem.splitScalar(u8, data_dirs, ':');
+    while (parts.next()) |part| {
+        if (part.len == 0) continue;
+        if (try findCompletionFileUnder(allocator, sh, part, file_name)) |path| return path;
+    }
+    if (try findCompletionFileUnder(allocator, sh, build_config.datadir, file_name)) |path| return path;
+    return null;
+}
+
+fn findCompletionFileUnder(
+    allocator: std.mem.Allocator,
+    sh: anytype,
+    data_dir: []const u8,
+    file_name: []const u8,
+) !?[]const u8 {
+    const path = try std.fs.path.join(allocator, &.{ data_dir, "rush", "completions", file_name });
+    if (try fileExists(sh, path)) return path;
+    allocator.free(path);
     return null;
 }
 
@@ -779,6 +810,38 @@ fn fileExists(sh: anytype, path: []const u8) !bool {
     const path_z = try sh.allocator.dupeZ(u8, path);
     defer sh.allocator.free(path_z);
     return sh.host.existsZ(path_z);
+}
+
+test "completion files use the XDG user data fallback" {
+    const TestState = struct {
+        const Self = @This();
+
+        fn getVariable(_: Self, name: []const u8) ?shell.state.Variable {
+            if (std.mem.eql(u8, name, "HOME")) return .{ .name = "HOME", .value = "/home/alice" };
+            if (std.mem.eql(u8, name, "XDG_DATA_DIRS")) {
+                return .{ .name = "XDG_DATA_DIRS", .value = "/usr/local/share:/usr/share" };
+            }
+            return null;
+        }
+    };
+    const TestHost = struct {
+        const Self = @This();
+
+        fn existsZ(_: Self, path: [:0]const u8) bool {
+            return std.mem.eql(u8, path, "/home/alice/.local/share/rush/completions/open.json");
+        }
+    };
+    const TestShell = struct {
+        allocator: std.mem.Allocator,
+        host: TestHost = .{},
+        state: TestState = .{},
+        env: []const [*:0]const u8 = &.{},
+    };
+
+    var sh: TestShell = .{ .allocator = std.testing.allocator };
+    const path = (try findCompletionFile(std.testing.allocator, &sh, "open", ".json")).?;
+    defer std.testing.allocator.free(path);
+    try std.testing.expectEqualStrings("/home/alice/.local/share/rush/completions/open.json", path);
 }
 
 // ziglint-ignore: Z024 preserve existing readable expression shape; lint-only cleanup
