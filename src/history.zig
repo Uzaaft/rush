@@ -1145,22 +1145,54 @@ fn queryHistorySuggestion(
     defer like_pattern.deinit(allocator);
     try appendSqlLikePrefix(allocator, &like_pattern, prefix);
 
+    // Keep cwd preference out of ORDER BY so SQLite can walk each recency index
+    // backwards and stop at the first match instead of sorting every matching
+    // prefix. Short prefixes such as "g" can otherwise sort most of a large
+    // history database on every keypress.
     var stmt: ?*sqlite.sqlite3_stmt = null;
     try sqliteCheck(sqlite.sqlite3_prepare_v2(
         db,
+        \\with matching as materialized (
+        \\  select 1
+        \\  from history indexed by history_command_nocase_id_idx
+        \\  where command like ?1 escape '\'
+        \\    and length(cast(command as blob)) > ?2
+        \\  limit 1
+        \\), local_match as materialized (
         \\select h.id, h.command, h.started_at
-        \\from history h
-        \\where h.command like ?1 escape '\'
+        \\from matching cross join history h indexed by history_cwd_id_idx
+        \\where h.cwd = ?3
+        \\  and h.command like ?1 escape '\'
+        \\  and length(cast(h.command as blob)) > ?2
+        \\  and not exists (
+        \\    select 1 from history newer
+        \\    where newer.command_key = h.command_key
+        \\      and newer.cwd = ?3
+        \\      and newer.id > h.id
+        \\  )
+        \\order by h.id desc
+        \\limit 1
+        \\), global_match as materialized (
+        \\select h.id, h.command, h.started_at
+        \\from matching cross join history h not indexed
+        \\where not exists (select 1 from local_match)
+        \\  and h.cwd <> ?3
+        \\  and h.command like ?1 escape '\'
         \\  and length(cast(h.command as blob)) > ?2
         \\  and not exists (
         \\    select 1 from history newer
         \\    where newer.command_key = h.command_key
         \\      and (
-        \\        (newer.cwd = ?3 and h.cwd <> ?3) or
-        \\        ((newer.cwd = ?3) = (h.cwd = ?3) and newer.id > h.id)
+        \\        newer.cwd = ?3 or
+        \\        (newer.cwd <> ?3 and newer.id > h.id)
         \\      )
         \\  )
-        \\order by (h.cwd = ?3) desc, h.id desc
+        \\order by h.id desc
+        \\limit 1
+        \\)
+        \\select id, command, started_at from local_match
+        \\union all
+        \\select id, command, started_at from global_match
         \\limit 1
     ,
         -1,
@@ -2437,6 +2469,34 @@ test "history autosuggestion ranks cwd matches before global recency" {
     const suggestion = (try history.suggestEntry(std.testing.allocator, "ls", "/repo", "", "")).?;
     defer suggestion.deinit(std.testing.allocator);
     try std.testing.expectEqualStrings("ls repo", suggestion.text);
+}
+
+test "history autosuggestion deduplicates normalized commands before prefix ranking" {
+    const path = "rush-history-suggestion-dedupe-test.sqlite";
+    try deleteHistoryDbFilesIfExists(std.testing.io, path);
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path ++ "-wal") catch {};
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, path ++ "-shm") catch {};
+
+    var history = try History.init(std.testing.allocator);
+    defer history.deinit();
+    try history.load(std.testing.io, path);
+
+    try insertHistoryRecord(history.db, .{ .cmd = "git status", .cwd = "/repo", .when = 10 });
+    try insertHistoryRecord(history.db, .{ .cmd = "git  status", .cwd = "/other", .when = 20 });
+    const local = (try history.suggestEntry(std.testing.allocator, "git", "/repo", "", "")).?;
+    defer local.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings("git status", local.text);
+
+    try history.clearEntries();
+    try insertHistoryRecord(history.db, .{ .cmd = "git status", .cwd = "/other", .when = 30 });
+    try insertHistoryRecord(history.db, .{ .cmd = " git status", .cwd = "/repo", .when = 40 });
+    try std.testing.expect(try history.suggestEntry(std.testing.allocator, "git", "/repo", "", "") == null);
+
+    try history.clearEntries();
+    try insertHistoryRecord(history.db, .{ .cmd = "git status", .cwd = "/repo", .when = 50 });
+    try insertHistoryRecord(history.db, .{ .cmd = " git  status", .cwd = "/repo", .when = 60 });
+    try std.testing.expect(try history.suggestEntry(std.testing.allocator, "git", "/repo", "", "") == null);
 }
 
 test "history autosuggestion follows menu order instead of command sequences" {
