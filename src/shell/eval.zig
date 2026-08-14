@@ -2782,7 +2782,7 @@ fn makeEnvBuiltinEntries(
     }
     for (assignments) |assignment| {
         const value = try expandEnvBuiltinAssignmentValue(shell, entries[0..entry_count], assignment);
-        try validateAssignment(shell, assignment.name, value);
+        try validateAssignment(shell, assignment.name);
         entries[entry_count] = .{
             .name = assignment.name,
             .value = value,
@@ -4485,6 +4485,7 @@ fn applyExportedAssignments(shell: anytype, assignments: []const ast.Assignment)
     var status: ?result.ExitStatus = null;
     for (assignments) |assignment| {
         const value = try expandAssignmentValue(shell, assignment, &status);
+        try validateAssignment(shell, assignment.name);
         try shell.state.putVariable(.{ .name = assignment.name, .value = value, .exported = true });
     }
 }
@@ -4772,7 +4773,7 @@ fn applyAssignments(shell: anytype, assignments: []const ast.Assignment) !void {
     _ = try applyAssignmentsWithStatus(shell, assignments);
 }
 
-fn validateAssignment(shell: anytype, name: []const u8, value: []const u8) !void {
+fn validateAssignment(shell: anytype, name: []const u8) !void {
     if (shell.state.getVariableAttributes(name)) |attributes| {
         if (attributes.readonly) {
             try writeReadonlyDiagnostic(shell, name);
@@ -4780,7 +4781,7 @@ fn validateAssignment(shell: anytype, name: []const u8, value: []const u8) !void
         }
     }
     if (shell.state.getVariable(name)) |variable| {
-        if (variable.readonly and !std.mem.eql(u8, variable.value, value)) {
+        if (variable.readonly) {
             try writeReadonlyDiagnostic(shell, name);
             return error.AssignmentError;
         }
@@ -4853,6 +4854,7 @@ fn applyAssignment(
         return value;
     }
 
+    try validateAssignment(shell, assignment.name);
     if (applyDynamicVariableAssignment(shell, assignment.name, value)) return value;
     shell.state.putVariable(.{
         .name = assignment.name,

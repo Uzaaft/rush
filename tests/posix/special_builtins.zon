@@ -307,6 +307,17 @@
             .status_match = .nonzero,
         },
         .{
+            .name = "assignment repeating readonly value exits nonzero",
+            .script =
+            \\readonly ro=value
+            \\ro=value
+            \\printf 'bad\n'
+            ,
+            .stdout = "",
+            .stderr_match = .nonempty,
+            .status_match = .nonzero,
+        },
+        .{
             .name = "readonly assignment error before special builtin exits the shell",
             .script =
             \\readonly ro=value
