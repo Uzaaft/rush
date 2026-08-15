@@ -150,7 +150,9 @@ fn commandResolves(
 fn existingCommandPath(allocator: std.mem.Allocator, sh: *RushShell, command: []const u8) bool {
     const command_z = allocator.dupeZ(u8, command) catch return false;
     defer allocator.free(command_z);
-    return sh.host.existsZ(command_z);
+    if (!sh.host.fileAccessZ(command_z, .execute)) return false;
+    const status = sh.host.fileTestStatusZ(command_z, true) orelse return false;
+    return status.kind != .directory;
 }
 
 /// Caches exact external-command lookups instead of eagerly enumerating PATH,
@@ -326,6 +328,37 @@ test "interactive input analysis marks unresolved command tokens only" {
     try std.testing.expectEqualStrings("cached", text[analyzed.spans[6].start..analyzed.spans[6].end]);
     try std.testing.expectEqual(Severity.operator, analyzed.spans[7].severity);
     try std.testing.expectEqualStrings("<", text[analyzed.spans[7].start..analyzed.spans[7].end]);
+}
+
+test "interactive input analysis requires command paths to be executable files" {
+    const tmpdir = "rush-input-analysis-command-test-tmp";
+    try std.Io.Dir.cwd().deleteTree(std.testing.io, tmpdir);
+    try std.Io.Dir.cwd().createDir(std.testing.io, tmpdir, .default_dir);
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, tmpdir) catch {};
+
+    const plain = try std.Io.Dir.cwd().createFile(std.testing.io, tmpdir ++ "/plain", .{
+        .permissions = @enumFromInt(0o600),
+    });
+    plain.close(std.testing.io);
+    const executable = try std.Io.Dir.cwd().createFile(std.testing.io, tmpdir ++ "/executable", .{
+        .permissions = @enumFromInt(0o700),
+    });
+    executable.close(std.testing.io);
+    try std.Io.Dir.cwd().createDir(std.testing.io, tmpdir ++ "/directory", .default_dir);
+
+    var sh = RushShell.init(std.testing.allocator, .{}, .{});
+    defer sh.deinit();
+    var command_cache: PathCommandCache = .{};
+    defer command_cache.deinit(std.testing.allocator);
+
+    const text = tmpdir ++ "/plain\n" ++ tmpdir ++ "/executable\n" ++ tmpdir ++ "/directory";
+    const analyzed = (try analyze(std.testing.allocator, &sh, &command_cache, text)).?;
+    defer analyzed.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(usize, 3), analyzed.spans.len);
+    try std.testing.expectEqual(editor.render.DiagnosticSeverity.command_invalid, analyzed.spans[0].severity);
+    try std.testing.expectEqual(editor.render.DiagnosticSeverity.command, analyzed.spans[1].severity);
+    try std.testing.expectEqual(editor.render.DiagnosticSeverity.command_invalid, analyzed.spans[2].severity);
 }
 
 test "interactive input analysis styles assignment operator and expanded value separately" {
