@@ -183,6 +183,28 @@
             .status = 0,
         },
         .{
+            .name = "unset preserves readonly indexed arrays",
+            .script =
+            \\readonly -a whole=(a b)
+            \\unset whole
+            \\printf 'whole-status=<%s> count=<%s> values=<%s>\n' "$?" "${#whole[@]}" "${whole[*]}"
+            \\readonly -a element=(a b)
+            \\unset 'element[0]'
+            \\printf 'element-status=<%s> count=<%s> values=<%s>\n' "$?" "${#element[@]}" "${element[*]}"
+            \\readonly -a all=(a b)
+            \\unset 'all[@]'
+            \\printf 'all-status=<%s> count=<%s> values=<%s>\n' "$?" "${#all[@]}" "${all[*]}"
+            ,
+            .stdout =
+            \\whole-status=<1> count=<2> values=<a b>
+            \\element-status=<1> count=<2> values=<a b>
+            \\all-status=<1> count=<2> values=<a b>
+            \\
+            ,
+            .stderr_match = .nonempty,
+            .status = 0,
+        },
+        .{
             .name = "command substitution clears errexit by default",
             .script =
             \\set -e

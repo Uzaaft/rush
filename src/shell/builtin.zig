@@ -1903,7 +1903,17 @@ fn evalUnset(shell: anytype, args: []const []const u8) !result.EvalResult {
                 try shell.state.suppressFunctionAutoload(name);
             }
         } else if (array_target) |target| {
-            status = try unsetArrayTarget(shell, target, status);
+            if (shell.state.getArray(name)) |array| {
+                if (array.readonly) {
+                    // ziglint-ignore: Z024 preserve existing readable expression shape; lint-only cleanup
+                    try shell.host.writeAll(.stderr, try std.fmt.allocPrint(shell.scratchAllocator(), "{s}: readonly variable\n", .{name}));
+                    status = 1;
+                } else {
+                    status = try unsetArrayTarget(shell, target, status);
+                }
+            } else {
+                status = try unsetArrayTarget(shell, target, status);
+            }
         } else if (shell.state.getVariable(name)) |variable| {
             if (variable.readonly) {
                 // ziglint-ignore: Z024 preserve existing readable expression shape; lint-only cleanup
@@ -1920,8 +1930,14 @@ fn evalUnset(shell: anytype, args: []const []const u8) !result.EvalResult {
             } else {
                 shell.state.removeVariableAttributes(name);
             }
-        } else if (shell.state.getArray(name) != null) {
-            shell.state.removeArray(name);
+        } else if (shell.state.getArray(name)) |array| {
+            if (array.readonly) {
+                // ziglint-ignore: Z024 preserve existing readable expression shape; lint-only cleanup
+                try shell.host.writeAll(.stderr, try std.fmt.allocPrint(shell.scratchAllocator(), "{s}: readonly variable\n", .{name}));
+                status = 1;
+            } else {
+                shell.state.removeArray(name);
+            }
         }
     }
     return .{ .status = status, .flow = if (status == 1) .{ .fatal = status } else .normal };
