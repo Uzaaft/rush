@@ -1526,6 +1526,10 @@ fn applyLinuxFdActions(actions: []const host.SpawnFdAction) void {
             if (linux.errno(rc) != .SUCCESS) linux.exit(127);
         },
         .duplicate => |dup| {
+            if (dup.from == dup.to) {
+                linuxSetCloseOnExec(dup.to, false) catch linux.exit(127);
+                continue;
+            }
             const rc = linux.dup2(dup.from.raw(), dup.to.raw());
             if (linux.errno(rc) != .SUCCESS) linux.exit(127);
         },
@@ -1539,6 +1543,10 @@ fn applyLibcFdActions(actions: []const host.SpawnFdAction) void {
             if (std.c.errno(rc) != .SUCCESS) std.c._exit(127);
         },
         .duplicate => |dup| {
+            if (dup.from == dup.to) {
+                libcSetCloseOnExec(dup.to, false) catch std.c._exit(127);
+                continue;
+            }
             const rc = std.c.dup2(@intCast(dup.from.raw()), @intCast(dup.to.raw()));
             if (std.c.errno(rc) != .SUCCESS) std.c._exit(127);
         },

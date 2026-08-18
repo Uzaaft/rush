@@ -609,7 +609,10 @@ fn staticLiteralParts(parts: []const ast.WordPart) ?[]const u8 {
 fn applyPipelineChildFdActions(shell: anytype, actions: []const host_mod.SpawnFdAction) !void {
     for (actions) |action| switch (action) {
         .close => |fd| try shell.host.close(fd),
-        .duplicate => |dup| try shell.host.duplicateTo(dup.from, dup.to),
+        .duplicate => |dup| if (dup.from == dup.to)
+            try shell.host.setCloseOnExec(dup.to, false)
+        else
+            try shell.host.duplicateTo(dup.from, dup.to),
     };
 }
 
@@ -630,8 +633,14 @@ fn pipelineFdActions(
         .to = .stdout,
     } });
     for (pipes) |pipe_desc| {
-        try actions.append(allocator, .{ .close = pipe_desc.read });
-        try actions.append(allocator, .{ .close = pipe_desc.write });
+        for ([_]host_mod.Fd{ pipe_desc.read, pipe_desc.write }) |fd| {
+            // A pipe can reuse a closed standard descriptor. Keep the stage's
+            // pipeline target open after duplicateTo, including when it was
+            // already the target descriptor and duplicateTo was a no-op.
+            if (stage_index != 0 and fd == .stdin) continue;
+            if (stage_index < pipes.len and fd == .stdout) continue;
+            try actions.append(allocator, .{ .close = fd });
+        }
     }
 
     return actions.toOwnedSlice(allocator);
