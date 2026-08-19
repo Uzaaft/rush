@@ -27,7 +27,7 @@
             .name = "PS1 expansion may mutate PS1 without invalidating the prompt source",
             .script = "",
             .stdin =
-            \\PS1='$((PS1=7))safe> '
+            \\PROMPT_COMMAND=:; PS1='$((PS1=7))safe> '
             \\printf 'after:<%s>\n' "$PS1"
             \\exit
             \\
