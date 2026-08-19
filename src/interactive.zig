@@ -58,9 +58,8 @@ pub fn run(
     sh.setFunctionAutoload(autoloadRushFunction);
 
     var source_id: shell.source.SourceId = 1;
-    if (try startup.source(&sh, &source_id, options.login, stdin_terminal)) |status| return status;
-
     if (!interactive) return runStdinScript(allocator, &sh, &source_id);
+    if (try startup.source(&sh, &source_id, options.login)) |status| return status;
 
     var command_history = try history.History.init(allocator);
     defer command_history.deinit();

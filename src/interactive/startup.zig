@@ -11,11 +11,8 @@ pub fn source(
     sh: anytype,
     source_id: *shell.source.SourceId,
     login: bool,
-    source_default_config: bool,
 ) !?u8 {
-    if (source_default_config) {
-        if (try sourceText(sh, source_id, "default_config", default_config)) |status| return status;
-    }
+    if (try sourceText(sh, source_id, "default_config", default_config)) |status| return status;
 
     if (envValue(sh.env, "ENV")) |env_path| {
         if (env_path.len != 0) {
