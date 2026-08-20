@@ -219,6 +219,7 @@ const SavedLocalBinding = struct {
 const LocalFrame = struct {
     saved: std.StringHashMapUnmanaged(SavedLocalBinding) = .empty,
     assignment_prefixes: std.StringHashMapUnmanaged(void) = .empty,
+    restore_all_bindings: bool = false,
 
     fn deinit(self: *LocalFrame, allocator: std.mem.Allocator) void {
         var saved_iterator = self.saved.iterator();
@@ -806,6 +807,34 @@ pub const State = struct {
         try self.local_frames.append(self.allocator, frame);
     }
 
+    /// Snapshots every variable binding for evaluation that must not mutate
+    /// the caller's variables. Requires a matching `popVariableSnapshot`.
+    pub fn pushVariableSnapshot(self: *State) !void {
+        var frame: LocalFrame = .{ .restore_all_bindings = true };
+        errdefer frame.deinit(self.allocator);
+
+        var iterator = self.bindings.valueIterator();
+        while (iterator.next()) |binding| try self.saveLocalBinding(&frame, binding.name);
+        try self.local_frames.append(self.allocator, frame);
+    }
+
+    /// Restores a frame created by `pushVariableSnapshot`, discarding both
+    /// changes to existing bindings and variables created after the snapshot.
+    pub fn popVariableSnapshot(self: *State) void {
+        std.debug.assert(self.local_frames.items.len != 0);
+        std.debug.assert(self.local_frames.items[self.local_frames.items.len - 1].restore_all_bindings);
+
+        var frame = self.local_frames.pop().?;
+        defer frame.deinit(self.allocator);
+
+        var iterator = self.bindings.valueIterator();
+        while (iterator.next()) |binding| binding.deinit(self.allocator);
+        self.bindings.clearRetainingCapacity();
+
+        var saved_iterator = frame.saved.valueIterator();
+        while (saved_iterator.next()) |binding| self.restoreSavedBinding(binding);
+    }
+
     /// Restores the variable bindings saved by the innermost local frame.
     ///
     /// Map capacity is reserved before any binding is touched, so the
@@ -814,6 +843,7 @@ pub const State = struct {
     /// remains pushed. Requires a matching `pushLocalFrame`.
     pub fn popLocalFrame(self: *State) !void {
         std.debug.assert(self.local_frames.items.len != 0);
+        std.debug.assert(!self.local_frames.items[self.local_frames.items.len - 1].restore_all_bindings);
         const saved_count = self.local_frames.items[self.local_frames.items.len - 1].saved.count();
         try self.bindings.ensureUnusedCapacity(self.allocator, saved_count);
 

@@ -589,6 +589,9 @@ fn appendFunctionProvider(
 ) !void {
     if (companion_path) |path| try sourceCompanionIfNeeded(allocator, io, sh, path);
 
+    try sh.state.pushVariableSnapshot();
+    defer sh.state.popVariableSnapshot();
+
     const parsed_options = try parsedOptionsForProvider(allocator, analyzed, root_command);
     defer allocator.free(parsed_options);
     const operands = try operandsForProvider(allocator, analyzed, root_command);
@@ -612,6 +615,10 @@ fn appendFunctionProvider(
 
     const argument_index = try std.fmt.allocPrint(allocator, "{d}", .{semantic.operand_index});
     defer allocator.free(argument_index);
+    sh.state.removeVariable("rush_completion_prefix");
+    sh.state.removeVariable("rush_completion_argument_index");
+    sh.state.removeVariable("rush_completion_options_terminated");
+    sh.state.removeVariable("rush_completion_value_position");
     try sh.state.putVariable(.{ .name = "rush_completion_prefix", .value = analyzed.prefix });
     try sh.state.putVariable(.{ .name = "rush_completion_argument_index", .value = argument_index });
     // ziglint-ignore: Z024 preserve existing readable expression shape; lint-only cleanup
@@ -1225,6 +1232,12 @@ test "completion loads manifest subcommands" {
 test "completion includes dynamic option provider candidates" {
     var sh = shell.ShellWithBuiltins(host.RealHost, extensions.rush.registry).init(std.testing.allocator, .{}, .{});
     defer sh.deinit();
+    try sh.state.putVariable(.{
+        .name = "rush_completion_prefix",
+        .value = "original",
+        .readonly = true,
+    });
+    try sh.state.putVariable(.{ .name = "project_option_count", .value = "original" });
 
     const source = "zig build -Doptimize=";
     var application = try complete(&sh, std.testing.allocator, std.testing.io, source, source.len);
@@ -1233,10 +1246,16 @@ test "completion includes dynamic option provider candidates" {
         .ambiguous => |candidates| candidates,
         else => return error.ExpectedDynamicOptionCandidates,
     };
+    var found_release_safe = false;
     for (candidates) |candidate| {
-        if (std.mem.eql(u8, candidate.value, "-Doptimize=ReleaseSafe")) return;
+        if (std.mem.eql(u8, candidate.value, "-Doptimize=ReleaseSafe")) found_release_safe = true;
     }
-    return error.ExpectedOptimizeReleaseSafeCandidate;
+    try std.testing.expect(found_release_safe);
+    try std.testing.expectEqualStrings("original", sh.state.getVariable("rush_completion_prefix").?.value);
+    try std.testing.expect(sh.state.getVariable("rush_completion_prefix").?.readonly);
+    try std.testing.expectEqualStrings("original", sh.state.getVariable("project_option_count").?.value);
+    try std.testing.expectEqual(@as(?shell.state.Variable, null), sh.state.getVariable("tmp"));
+    try std.testing.expectEqual(@as(?shell.state.Variable, null), sh.state.getVariable("in_project_options"));
 }
 
 test "provider context preserves root options before a subcommand" {
